@@ -92,7 +92,6 @@ class PickledObjectField(models.Field):
     None values since they aren't pickled and encoded.
 
     """
-    __metaclass__ = models.SubfieldBase
 
     def __init__(self, *args, **kwargs):
         self.compress = kwargs.pop('compress', False)
