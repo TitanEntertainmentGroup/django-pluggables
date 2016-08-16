@@ -47,6 +47,30 @@ def dbsafe_encode(value, compress_object=False):
     return PickledObject(value)
 
 
+class CastOnAssignDescriptor(object):
+    """
+    Copied from
+    https://github.com/hzdg/django-enumfields/blob/13919f5/enumfields/fields.py
+
+    A property descriptor which ensures that `field.to_python()` is called
+    on _every_ assignment to the field.
+    This used to be provided by the `django.db.models.subclassing.Creator`
+    class, which in turn was used by the deprecated-in-Django-1.10
+    `SubfieldBase` class, hence the reimplementation here.
+    """
+
+    def __init__(self, field):
+        self.field = field
+
+    def __get__(self, obj, type=None):
+        if obj is None:
+            return self
+        return obj.__dict__[self.field.name]
+
+    def __set__(self, obj, value):
+        obj.__dict__[self.field.name] = self.field.to_python(value)
+
+
 def dbsafe_decode(value, compress_object=False):
     if not compress_object:
         value = loads(b64decode(value))
@@ -132,8 +156,8 @@ class PickledObjectField(models.Field):
             # isn't rejected by the postgresql_psycopg2 backend. Alternatively,
             # we could have just registered PickledObject with the psycopg
             # marshaller (telling it to store it like it would a string), but
-            # since both of these methods result in the same value being stored,
-            # doing things this way is much easier.
+            # since both of these methods result in the same value being
+            # stored, doing things this way is much easier.
             value = force_unicode(dbsafe_encode(value, self.compress))
         return value
 
@@ -144,11 +168,16 @@ class PickledObjectField(models.Field):
     def get_internal_type(self):
         return 'TextField'
 
-    def get_db_prep_lookup(self, lookup_type, value, connection=None,
-                          prepared=False):
+    def get_db_prep_lookup(
+            self, lookup_type, value, connection=None, prepared=False):
         if lookup_type not in ['exact', 'in', 'isnull']:
             raise TypeError('Lookup type %s is not supported.' % lookup_type)
         # The Field model already calls get_db_prep_value before doing the
         # actual lookup, so all we need to do is limit the lookup types.
-        return super(PickledObjectField, self).get_db_prep_lookup(\
-                            lookup_type, value, connection, prepared=prepared)
+        return super(PickledObjectField, self).get_db_prep_lookup(
+            lookup_type, value, connection, prepared=prepared
+        )
+
+    def contribute_to_class(self, cls, name):
+        super(PickledObjectField, self).contribute_to_class(cls, name)
+        setattr(cls, name, CastOnAssignDescriptor(self))
